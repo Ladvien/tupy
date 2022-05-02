@@ -1,7 +1,8 @@
+// https://github.com/dhylands/serial-monitor/blob/master/src/main.rs
 // https://docs.rs/serial2/latest/serial2/
 // https://stackoverflow.com/questions/53440321/how-to-use-serial-port-in-multiple-threads-in-rust
 // https://tokio.rs/tokio/tutorial/shared-state
-use futures::{stream::StreamExt, SinkExt};
+use futures::{stream::StreamExt, FutureExt, SinkExt};
 use std::{env, io, str};
 use tokio::time::{sleep, Duration};
 use tokio_util::codec::{Decoder, Encoder};
@@ -59,29 +60,48 @@ async fn main() -> tokio_serial::Result<()> {
     let stream = LineCodec.framed(port);
     let (mut tx, mut rx) = stream.split();
 
-    tokio::spawn(async move {
-        loop {
-            let item = rx
-                .next()
-                .await
-                .expect("Error awaiting future in RX stream.")
-                .expect("Reading stream resulted in an error");
-            print!("{item}");
-        }
-    });
+    loop {
+        let event = rx.next().fuse();
 
-    tokio::spawn(async move {
-        loop {
-            let write_result = tx
-                .send(String::from(format!("{}\r", r#"print("hello")"#)))
-                .await;
-            sleep(Duration::from_secs(2)).await;
-            match write_result {
-                Ok(_) => (),
-                Err(err) => println!("{:?}", err),
-            }
+        tokio::select! {
+            maybe_serial_event = event => {
+                match maybe_serial_event {
+                    Some(real_serial_event) => match real_serial_event {
+                        Ok(chars) => print!("{}", chars),
+                        Err(err) =>  println!("{}", err),
+                    },
+                    None => println!("Uh-oh"),
+                }
+            },
+            // TODO: Add other events, key handling, etc.
         }
-    });
+    }
 
-    loop {}
+    // tokio::spawn(async move {
+    //     loop {
+    //         let item = rx
+    //             .next()
+    //             .await
+    //             .expect("Error awaiting future in RX stream.")
+    //             .expect("Reading stream resulted in an error");
+    //         print!("{item}");
+    //         sleep(Duration::from_millis(10)).await;
+    //     }
+    // });
+
+    // tokio::spawn(async move {
+    //     loop {
+    //         let write_result = tx
+    //             .send(String::from(format!("{}\r", r#"print("hello")"#)))
+    //             .await;
+    //         sleep(Duration::from_secs(2)).await;
+    //         match write_result {
+    //             Ok(_) => (),
+    //             Err(err) => println!("{:?}", err),
+    //         }
+    //     }
+    // });
+
+    // loop {}
+    Ok(())
 }
